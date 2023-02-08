@@ -37,6 +37,7 @@ import type { DeepPartial } from '../../types.js'
 import { getInitParams, VlsOptions } from './initParams.js'
 
 import { FileDiagnosticManager } from '../../FileDiagnosticManager.js'
+import debounce from 'lodash.debounce'
 
 enum DOC_VERSION {
   init = -1,
@@ -145,7 +146,10 @@ export async function prepareClientConnection(
     new StreamMessageReader(up),
     new StreamMessageWriter(down)
   )
-
+  const debounceDispatchDiagnostics = debounce((normalized, errorCount, warningCount) => {
+    options.onDispatchDiagnostics?.(normalized)
+    options.onDispatchDiagnosticsSummary?.(errorCount, warningCount)
+  }, 600)
   // hijack sendDiagnostics
   serverConnection.sendDiagnostics = async (publishDiagnostics) => {
     disposeSuppressConsole?.()
@@ -165,8 +169,7 @@ export async function prepareClientConnection(
     // only starts to log when all .vue files are loaded
     // onDispatchDiagnostics will dispatch diagnostics of all watched files
     if (initialVueFilesTick >= initialVueFilesCount) {
-      options.onDispatchDiagnostics?.(normalized)
-      options.onDispatchDiagnosticsSummary?.(errorCount, warningCount)
+      debounceDispatchDiagnostics(normalized, errorCount, warningCount)
     }
   }
 
@@ -340,26 +343,29 @@ async function getDiagnostics(
     // .vue file changed
     if (filePath.endsWith('.vue')) {
       const fileContent = await fs.promises.readFile(filePath, 'utf-8')
+      const stat = await fs.promises.stat(filePath)
       clientConnection.sendNotification(DidChangeTextDocumentNotification.type, {
         textDocument: {
           uri: URI.file(filePath).toString(),
-          version: Date.now(),
+          version: stat.mtimeMs,
         },
         contentChanges: [{ text: fileContent }],
       })
+    } else {
+      if (watchedDidChangeWatchedFiles.includes(extname)) {
+        clientConnection.sendNotification(DidChangeWatchedFilesNotification.type, {
+          changes: [
+            {
+              uri: URI.file(filePath).toString(),
+              type: event === 'add' ? 1 : event === 'unlink' ? 3 : 2,
+            },
+          ],
+        })
+      }
     }
+    // console.log(URI.file(filePath).toString());
 
-    // .js,.ts,.json,.tsx file changed
-    if (watchedDidChangeWatchedFiles.includes(extname)) {
-      clientConnection.sendNotification(DidChangeWatchedFilesNotification.type, {
-        changes: [
-          {
-            uri: URI.file(filePath).toString(),
-            type: event === 'add' ? 1 : event === 'unlink' ? 3 : 2,
-          },
-        ],
-      })
-    }
+    // .js,.ts,.json file changed
   })
 
   return null
