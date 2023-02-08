@@ -217,7 +217,7 @@ function extToGlobs(exts: string[]) {
 }
 
 const watchedDidChangeContent = ['.vue']
-const watchedDidChangeWatchedFiles = ['.js', '.ts', '.json']
+const watchedDidChangeWatchedFiles = ['.js', '.ts', '.json', 'tsx']
 const watchedDidChangeContentGlob = extToGlobs(watchedDidChangeContent)
 
 async function getDiagnostics(
@@ -338,17 +338,18 @@ async function getDiagnostics(
   watcher.on('all', async (event, filePath) => {
     const extname = path.extname(filePath)
     // .vue file changed
-    if (!filePath.endsWith('.vue')) return
-    const fileContent = await fs.promises.readFile(filePath, 'utf-8')
-    clientConnection.sendNotification(DidChangeTextDocumentNotification.type, {
-      textDocument: {
-        uri: URI.file(filePath).toString(),
-        version: Date.now(),
-      },
-      contentChanges: [{ text: fileContent }],
-    })
+    if (filePath.endsWith('.vue')) {
+      const fileContent = await fs.promises.readFile(filePath, 'utf-8')
+      clientConnection.sendNotification(DidChangeTextDocumentNotification.type, {
+        textDocument: {
+          uri: URI.file(filePath).toString(),
+          version: Date.now(),
+        },
+        contentChanges: [{ text: fileContent }],
+      })
+    }
 
-    // .js,.ts,.json file changed
+    // .js,.ts,.json,.tsx file changed
     if (watchedDidChangeWatchedFiles.includes(extname)) {
       clientConnection.sendNotification(DidChangeWatchedFilesNotification.type, {
         changes: [
